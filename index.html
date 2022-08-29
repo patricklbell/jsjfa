@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Jump Flood Algorithm</title>
+        <script src="utilities.js"></script> 
+        <script src="script.js"></script> 
+        <style>
+        body {
+            text-align : center;
+        }
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 5;
+        }
+        header {
+            position: absolute;
+            z-index: 100;
+            padding: 2px; 
+            padding-left: 10px; 
+            padding-right: 10px; 
+            margin: auto;
+        }
+        button {
+            position: relative;
+            z-index: 100;
+            font-size: 1.5em;
+            padding: 2px; 
+            padding-left: 10px; 
+            padding-right: 10px; 
+            margin: auto;
+            border: 0px;
+            background-color: lightsteelblu;
+            border-radius: 5px;
+        }
+        button:hover {
+            background-color: lightblue;
+        }
+        </style>
+    </head>
+    <body>
+        <div id="content">
+            <canvas>Your browser does not seem to support HTML canvas.</canvas>
+        </div>
+        <div class="header">
+            <button type="button" id="step-button" style="">Start</button>
+            <button type="button" id="play-button" style="">Play</button>           
+        </div>
+
+    </body>
+</html>
