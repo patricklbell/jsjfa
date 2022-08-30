@@ -24,6 +24,11 @@ function get_window_size() {
     };
 };
 
+function random_color() {
+    return new vec3(0.1 + 0.9*Math.random(), 0.1 + 0.9*Math.random(), 0.1 + 0.9*Math.random());
+}
+
+
 class vec2 {
     constructor(x, y) {
         if(x === undefined) {

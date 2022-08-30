@@ -2,7 +2,7 @@
 
 let canvas, gl;
 let jfa_fbos = [{}, {}], quad = {}, line = {}, shaders = {};
-let jfa_fbo_i = 0, jfa_step = null, jfa_num_steps = 8.0;
+let jfa_fbo_i = 0, jfa_step = null, jfa_num_steps = 10.0;
 
 // Run everything inside window load event handler, to make sure
 // DOM is fully loaded and styled before trying to manipulate it.
@@ -71,6 +71,22 @@ function compile_shader(vs_src, fs_src) {
 }
 
 function load_shaders() {
+    const common = `
+    vec3 decode_color(float data) {
+        vec3 color;
+
+        color.r = float(floor(10.0*data))/10.0;
+        color.g = float(floor(100.0*(data - color.r)))/10.0;
+        color.b = float(floor(1000.0*(data - color.r - color.g/10.0)))/10.0;
+
+        return color;
+    }
+    float encode_color(vec3 color) {
+        float f = floor(10.0*color.r)/10.0 + floor(10.0*color.g)/100.0 + floor(10.0*color.b)/1000.0;
+        return f;
+    }
+    `
+
     const blit_vs = `
     attribute vec4 position;
 
@@ -83,14 +99,14 @@ function load_shaders() {
     `;
 
     const blit_fs = `
-    precision mediump float;
+    precision mediump float; 
 
     varying vec2 texcoord;
 
     uniform sampler2D screen;
 
     void main() {
-        gl_FragColor = vec4(texture2D(screen, texcoord).rgb, 1.0);
+        gl_FragColor = texture2D(screen, texcoord);
     }
     `;
 
@@ -103,7 +119,7 @@ function load_shaders() {
     gl.useProgram(shaders.blit.program);
     gl.uniform1i(gl.getUniformLocation(shaders.blit.program, "screen"), gl.TEXTURE0);
 
-    const white_vs = `
+    const blit_jfa_vs = `
     attribute vec4 position;
 
     varying vec2 texcoord;
@@ -114,20 +130,60 @@ function load_shaders() {
     }
     `;
 
-    const white_fs = `
-    precision mediump float;
+    const blit_jfa_fs = `
+    precision mediump float; 
+    ` + common + `
+
+    varying vec2 texcoord;
+
+    uniform sampler2D screen;
+
+    void main() {
+        vec3 col = decode_color(texture2D(screen, texcoord).z);
+
+        gl_FragColor = vec4(col, 1.0);
+    }
+    `;
+
+    shaders.blit_jfa = {};
+    shaders.blit_jfa.program = compile_shader(blit_jfa_vs, blit_jfa_fs);
+    // For GLSL ES < 3.0, you can't specify layout in shader
+    gl.bindAttribLocation(shaders.blit_jfa.program, 0, 'position');
+
+    // Bind texture uniform to constant texture unit
+    gl.useProgram(shaders.blit_jfa.program);
+    gl.uniform1i(gl.getUniformLocation(shaders.blit_jfa.program, "screen"), gl.TEXTURE0);
+
+    const line_vs = `
+    attribute vec4 position;
 
     varying vec2 texcoord;
 
     void main() {
-      gl_FragColor = vec4(texcoord, 1.0, 1.0);
+        gl_Position = position;
+        texcoord = position.xy * .5 + .5;
     }
     `;
 
-    shaders.white = {};
-    shaders.white.program = compile_shader(white_vs, white_fs);
+    const line_fs = `
+    precision mediump float;
+    ` + common + `
+
+    varying vec2 texcoord;
+    uniform vec3 color;
+
+    void main() {
+      gl_FragColor = vec4(texcoord, encode_color(color), 1.0);
+    }
+    `;
+
+    shaders.line = {};
+    shaders.line.program = compile_shader(line_vs, line_fs);
     // For GLSL ES < 3.0, you can't specify layout in shader
-    gl.bindAttribLocation(shaders.white.program, 0, 'position');
+    gl.bindAttribLocation(shaders.line.program, 0, 'position');
+
+    shaders.line.uniforms = {};
+    shaders.line.uniforms.color = gl.getUniformLocation(shaders.line.program, "color");
 
     const jfa_vs = `
     attribute vec4 position;
@@ -140,6 +196,7 @@ function load_shaders() {
     // how many JFA steps to do.  2^num_steps is max image size on x and y
     const jfa_fs = `
     precision mediump float;
+    ` + common + `
     const float num_steps = ` + Math.floor(jfa_num_steps).toString() + `.0;
     uniform sampler2D seed;
     uniform float step;
@@ -155,7 +212,7 @@ function load_shaders() {
         
         float nearest_distance = 9999.0;
         vec2 nearest_coord = vec2(0.0);
-        vec3 nearest_color = vec3(0.0);
+        float nearest_color_encoded = 0.0;
         
         for (int y = -1; y <= 1; ++y) {
             for (int x = -1; x <= 1; ++x) {
@@ -169,26 +226,25 @@ function load_shaders() {
                 {
                     nearest_distance = dist;
                     nearest_coord = seed_coord;
-                    nearest_color = vec3(nearest_coord, 1.0);
+                    nearest_color_encoded = data.z;
                 }
             }
         }
 
-        return vec4(nearest_color, 1.0);
+        return vec4(nearest_coord.xy, nearest_color_encoded, 1.0);
     }
 
     vec3 make_distance_transform(in vec2 fragcoord) {
         vec2 texcoord = fragcoord / resolution.xy;
 
         vec4 data = texture2D(seed, texcoord);
+        vec2 seed_coord = data.xy;
 
-        if(data.z != 0.0) {
-            vec2 seed_coord = data.xy;
-            float dist = min(length(seed_coord - texcoord), 1.0);        
-            return vec3(dist);
-        } else {
-            return vec3(1.0, 0.0, 0.0);
-        }
+        float dist = length(seed_coord - texcoord);        
+
+        // only for visual purposes, add a bit of brightness
+        float brightness = 0.15 + 0.85*sqrt(dist / sqrt(2.0));
+        return brightness * decode_color(data.z);
     }
 
     //============================================================
@@ -301,6 +357,13 @@ function draw_jfa_step(step) {
 }
 
 function draw_jfa_framebuffer() {
+    gl.useProgram(shaders.blit_jfa.program);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, jfa_fbos[jfa_fbo_i].texture);
+    draw_quad();
+}
+
+function draw_jfa_distance_framebuffer() {
     gl.useProgram(shaders.blit.program);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, jfa_fbos[jfa_fbo_i].texture);
@@ -308,6 +371,7 @@ function draw_jfa_framebuffer() {
 }
 
 let is_left_mouse, left_mouse_pos = null, left_mouse_normal = null;
+let mouse_color = random_color();
 function draw_mouse_line(evt) {
     if(!is_left_mouse) {
         return;
@@ -355,7 +419,9 @@ function draw_mouse_line(evt) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, jfa_fbos[jfa_fbo_i].fbo);
     gl.viewport(0, 0, canvas.width, canvas.height);
 
-    gl.useProgram(shaders.white.program);
+    gl.useProgram(shaders.line.program);
+
+    gl.uniform3fv(shaders.line.uniforms.color, new Float32Array([mouse_color.x, mouse_color.y, mouse_color.z]));
 
     gl.bindBuffer(gl.ARRAY_BUFFER, line.buf)
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
@@ -432,7 +498,13 @@ function setup_gameloop() {
     load_shaders();
     load_primitives();
 
-    canvas.addEventListener("mousedown", (evt) => {is_left_mouse = true; if(jfa_step === null) {draw_mouse_line(evt);}});
+    canvas.addEventListener("mousedown", (evt) => {
+        is_left_mouse = true; 
+        if(jfa_step === null) {
+            mouse_color = random_color();
+            draw_mouse_line(evt);
+        }
+    });
     canvas.addEventListener("mouseup",   (evt) => {is_left_mouse = false; left_mouse_pos = null;});
     canvas.addEventListener("mousemove", (evt) => {if(jfa_step === null) {draw_mouse_line(evt);}}, false);
 
@@ -457,10 +529,14 @@ function gameloop (time) {
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
-    draw_jfa_framebuffer();
-
-    let gl_error = gl.getError();
-    if(gl_error !== 0) {
-        console.log(gl_error);
+    if(jfa_step === jfa_num_steps + 2) {
+        draw_jfa_distance_framebuffer();
+    } else {
+        draw_jfa_framebuffer();
     }
+
+    //let gl_error = gl.getError();
+    //if(gl_error !== 0) {
+    //    console.log(gl_error);
+    //}
 }
